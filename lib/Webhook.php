@@ -46,9 +46,7 @@ class Webhook
             ], 403);
         }
 
-        return response()->json([
-            json_decode($payload, true),
-        ], 200);
+        return json_decode($payload, true);
     }
 
     /**
