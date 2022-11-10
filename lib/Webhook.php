@@ -13,30 +13,54 @@ class Webhook
      * @param $payload
      * @param $header
      * @param $secret
-     * @return mixed
-     * @throws AuthenticationVerification
-     * @throws Decrypt
+     * @return \Illuminate\Http\JsonResponse
      */
     public static function constructEvent($payload, $header, $secret)
     {
+        self::$secret = $secret;
+
         $bearer = self::getBearer($header);
 
-        self::$secret = $secret;
+        if ($bearer === false) {
+            return response()->json([
+                'message' => 'Unable to get Decrypt Bearer',
+            ], 403);
+        }
 
         $token = self::getToken($bearer);
         $timestamp = self::getTimestamp($bearer);
 
-        if (!password_verify($secret, $token)) {
-            throw new Error\AuthenticationVerification(
-                "Token and Secret do not match"
-            );
+        if (self::verifyToken($secret, $token) === false){
+            return response()->json([
+                'message' => 'Token and Secret do not match',
+            ], 401);
         }
 
         $key = $token . ':' . $timestamp;
 
         $payload = self::getPayload(json_decode($payload), $key);
 
-        return json_decode($payload, true);
+        if ($payload === false) {
+            return response()->json([
+                'message' => 'Unable to get Decrypt Payload',
+            ], 403);
+        }
+
+        return response()->json([
+            json_decode($payload, true),
+        ], 200);
+    }
+
+    /**
+     * @param $secret
+     * @param $token
+     * @return false
+     */
+    public static function verifyToken($secret, $token)
+    {
+        if (!password_verify($secret, $token)) {
+            return false;
+        }
     }
 
     /**
@@ -47,7 +71,7 @@ class Webhook
     {
         if (!empty($header)) {
             if (preg_match('/Bearer\s(\S+)/', $header, $matches)) {
-                return $matches[1];
+                return self::decrypter($matches[1], self::$secret);
             }
         }
         return null;
@@ -59,9 +83,7 @@ class Webhook
      */
     private static function getTimestamp($bearer)
     {
-        $decryptedBearer = self::decrypter($bearer, self::$secret);
-
-        return substr($decryptedBearer, strpos($decryptedBearer, ":") + 1);
+        return substr($bearer, strpos($bearer, ":") + 1);
     }
 
     /**
@@ -70,9 +92,7 @@ class Webhook
      */
     private static function getToken($bearer)
     {
-        $decryptedBearer = self::decrypter($bearer, self::$secret);
-
-        return strtok($decryptedBearer, ':');
+        return strtok($bearer, ':');
     }
 
     /**
@@ -90,21 +110,12 @@ class Webhook
      * @param $encodeString
      * @param $key
      * @return false|string
-     * @throws Decrypt
      */
     private static function decrypter($encodeString, $key)
     {
         $encodeString = preg_replace('/-/i', '+', $encodeString);
         $encodeString = preg_replace('/_/i', '/', $encodeString);
 
-        $decryptedString = openssl_decrypt( $encodeString , 'des-ede3', $key, 0, '');
-
-        if ($decryptedString === false) {
-            throw new Error\Decrypt(
-                "Unable to decrypt data"
-            );
-        }
-
-        return openssl_decrypt( $encodeString , 'des-ede3', $key, 0, '');
+        return openssl_decrypt($encodeString , 'des-ede3', $key, 0, '');
     }
 }
